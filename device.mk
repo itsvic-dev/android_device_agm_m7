@@ -11,10 +11,12 @@ TARGET_AUDIO_MAINLINE_UCM_PROFILES := none
 TARGET_BLUETOOTH_HAL := none
 TARGET_FOLLOWS_LATEST_SHIPPING_API_LEVEL := true
 TARGET_FOLLOWS_LATEST_VINTF_TARGET_LEVEL := true
-TARGET_GRAPHICS := swiftshader
+# GLES through ANGLE on Mesa's PowerVR Vulkan driver
+TARGET_GRAPHICS := mesa
+TARGET_GRAPHICS_EGL := angle
+TARGET_GRAPHICS_VULKAN := mesa
 TARGET_GRAPHICS_ALLOCATOR_HAL := minigbm-upstream
 TARGET_MINIGBM_PLATFORM := generic
-# TODO: drm_hwcomposer needs ABGR8888 on the mt6739-dbi plane, else use drmfb-composer (see DESIGN.md)
 TARGET_GRAPHICS_COMPOSER_HAL := drm_hwcomposer
 TARGET_HAS_BATTERY := true
 # TODO: check if the phone has a vibration motor
@@ -79,6 +81,11 @@ PRODUCT_COPY_FILES += \
 PRODUCT_VENDOR_PROPERTIES += \
     apexd.config.dm_create.timeout=10000 \
     ro.sf.lcd_density=120
+
+# For the PowerVR driver; Mesa reads PVR_I_WANT_A_BROKEN_VULKAN_DRIVER from the property
+PRODUCT_VENDOR_PROPERTIES += \
+    ro.hardware.vulkan=powervr_mesa \
+    vendor.mesa.pvr.i.want.a.broken.vulkan.driver=1
 
 PRODUCT_PACKAGES += \
     mt6739-wlan-nvram.bin

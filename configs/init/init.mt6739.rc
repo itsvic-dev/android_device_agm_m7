@@ -16,6 +16,11 @@ on fs
     mkdir /mnt/vendor/nvdata 0770 system system
     mount_all --early
 
+# GPU: the DDK 1.9 firmware is in /vendor/firmware/powervr
+on post-fs
+    exec u:r:vendor_modprobe:s0 -- /vendor/bin/modprobe -d /vendor/lib/modules powervr
+    wait /dev/dri/renderD128
+
 on late-fs
     mount_all --late
 

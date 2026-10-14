@@ -12,6 +12,8 @@ TARGET_KERNEL_MIXED_MODE := false
 
 include device/mainline/common/BoardConfigMainlineCommon.mk
 
+BOARD_MESA3D_VULKAN_DRIVERS := imagination
+
 # Arch
 TARGET_ARCH := arm64
 TARGET_ARCH_VARIANT := armv8-a
