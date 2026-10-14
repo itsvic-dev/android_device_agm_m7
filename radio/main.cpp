@@ -105,9 +105,11 @@ int mainImpl(impl::AtChannel::HostChannelFactory hostChannelFactory) {
         static const std::string_view initCmds[] = {
             "ATE0Q0V1"sv,
             "AT+CMEE=1"sv,
-            // MediaTek: the SIM is off until +EFUN=0
+            // MediaTek: the SIM is off until +EFUN=0, and without +EGTYPE=1 the modem
+            // attaches for packet data only on +CGATT=1, also after each +CFUN=1
             "AT+EBOOT=0"sv,
             "AT+EFUN=0"sv,
+            "AT+EGTYPE=1"sv,
             "AT+CREG=2"sv,
             "AT+CGREG=2"sv,
             "AT+CEREG=2"sv,
