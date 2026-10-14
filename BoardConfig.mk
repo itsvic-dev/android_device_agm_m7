@@ -14,6 +14,9 @@ include device/mainline/common/BoardConfigMainlineCommon.mk
 
 BOARD_MESA3D_VULKAN_DRIVERS := imagination
 
+# HWUI renders with Vulkan directly, which is faster than GLES through ANGLE
+TARGET_USES_VULKAN := true
+
 # Arch
 TARGET_ARCH := arm64
 TARGET_ARCH_VARIANT := armv8-a

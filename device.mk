@@ -87,6 +87,10 @@ PRODUCT_VENDOR_PROPERTIES += \
     ro.hardware.vulkan=powervr_mesa \
     vendor.mesa.pvr.i.want.a.broken.vulkan.driver=1
 
+# SurfaceFlinger composites with Vulkan instead of GLES through ANGLE
+PRODUCT_VENDOR_PROPERTIES += \
+    debug.renderengine.backend=skiavkthreaded
+
 PRODUCT_PACKAGES += \
     mt6739-wlan-nvram.bin
 
