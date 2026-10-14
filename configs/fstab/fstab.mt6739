@@ -19,5 +19,8 @@ odm         /odm         erofs  ro  wait,logical,first_stage_mount
 # TODO: confirm the MSDC0 sysfs name (soc/11230000.mmc)
 /dev/block/platform/soc/11230000.mmc/by-name/nvdata  /mnt/vendor/nvdata  ext4  ro,noload,nosuid,nodev,noatime  wait,nofail
 
+# The MediaTek bootloader message partition, as in the stock fstab
+/dev/block/platform/soc/11230000.mmc/by-name/para  /misc  emmc  defaults  defaults
+
 # ZRAM
 /dev/block/zram0  none  swap  defaults  zramsize=50%
