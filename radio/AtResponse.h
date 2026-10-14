@@ -80,6 +80,12 @@ struct AtResponse {
         std::string_view cmd;
     };
 
+    // A +CMD: line that no parser knows; MediaTek modems send many of them.
+    struct Unsolicited {
+        std::string cmd;
+        std::string payload;
+    };
+
     struct CPIN {
         enum class State {
             ABSENT, NOT_READY, READY, PIN, PUK
@@ -686,7 +692,7 @@ private:
                                CLIP, CLIR, CMUT, WSOS,
                                CSCA, CSCB, CMGS, CMGW, CMT, CDS,
                                MBAU,
-                               CTZV,
+                               CTZV, Unsolicited,
                                std::string
                   >;
     Value value;

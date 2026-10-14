@@ -66,6 +66,10 @@ struct CmdIdVisitor {
         return "ParseError"sv;
     }
 
+    std::string_view operator()(const AtResponse::Unsolicited&) const {
+        return "Unsolicited"sv;
+    }
+
     std::string_view operator()(const std::string&) const {
         return "string"sv;
     }
@@ -144,9 +148,21 @@ AtResponse::ParseResult parseCmds(const std::string_view str,
 
     if (maybeIncomplete) {
         return { 0, nullptr };
-    } else {
-        return { -1, FAILURE(nullptr) };
     }
+
+    const size_t end = str.find(kCR);
+    if (end == str.npos) {
+        return { 0, nullptr };
+    }
+
+    const std::string_view line = str.substr(1, end - 1);
+    const size_t colon = line.find(':');
+    AtResponse::Unsolicited unsolicited;
+    unsolicited.cmd = toString(line.substr(0, colon));
+    if (colon != line.npos) {
+        unsolicited.payload = toString(ltrim(line.substr(colon + 1)));
+    }
+    return { int(end + 1), AtResponse::make(std::move(unsolicited)) };
 }
 }  // namespace
 
@@ -174,7 +190,6 @@ AtResponse::ParseResult AtResponse::parse(const std::string_view str) {
         { CMD(CUSATT),      false },
         { CMD(CUSATEND),    false },
         { CMD(CGDCONT),     true },
-        { CMD(CGCONTRDP),   false },
         { CMD(CLCK),        false },
         { CMD(CSIM),        false },
         { CMD(CGLA),        false },
