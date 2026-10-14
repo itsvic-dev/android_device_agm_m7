@@ -109,6 +109,7 @@ struct RadioNetwork : public network::BnRadioNetwork {
     void handleUnsolicited(const AtResponse::CFUN&);
     void handleUnsolicited(const AtResponse::CREG&);
     void handleUnsolicited(const AtResponse::CGREG&);
+    void handleUnsolicited(const AtResponse::CEREG&);
     void handleUnsolicited(const AtResponse::CSQ&);
     void handleUnsolicited(const AtResponse::COPS&);
     void handleUnsolicited(const AtResponse::CTEC&);
@@ -135,6 +136,7 @@ private:
     std::mutex          mMtx;
     AtResponse::CREG    mCreg;
     AtResponse::CGREG   mCgreg;
+    AtResponse::CEREG   mCereg;
     AtResponse::CSQ     mCsq;
     std::optional<AtResponse::COPS::OperatorInfo> mCurrentOperator;
     std::optional<ratUtils::ModemTechnology> mCurrentModemTech;

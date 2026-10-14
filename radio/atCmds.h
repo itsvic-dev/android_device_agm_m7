@@ -58,6 +58,9 @@ static constexpr std::string_view getModemPowerState =
 static constexpr std::string_view getSupportedRadioTechs =
     "AT+CTEC=?"sv;
 
+static constexpr std::string_view getGprsRegistration = "AT+CGREG?"sv;
+static constexpr std::string_view getEpsRegistration = "AT+CEREG?"sv;
+
 static constexpr std::string_view getCurrentPreferredRadioTechs =
     "AT+CTEC?"sv;
 

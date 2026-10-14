@@ -62,6 +62,10 @@ using network::RegStateResult;
 using network::SignalStrength;
 
 namespace {
+bool isRegistered(const network::RegState state) {
+    return state == network::RegState::REG_HOME || state == network::RegState::REG_ROAMING;
+}
+
 CellIdentityCdma makeCellIdentityCdma(OperatorInfo operatorInfo) {
     CellIdentityCdma result = {
         .networkId = RadioConst::VALUE_UNAVAILABLE,
@@ -605,11 +609,50 @@ ScopedAStatus RadioNetwork::getDataRegistrationState(const int32_t serial) {
         int areaCode;
         int cellId;
 
+        // Packet data follows +CGREG and +CEREG. +CREG is circuit switched only, and
+        // MediaTek modems register it on GSM long before they attach for packet data.
+        {
+            using CGREG = AtResponse::CGREG;
+            using CEREG = AtResponse::CEREG;
+
+            AtResponsePtr response =
+                mAtConversation(requestPipe, atCmds::getGprsRegistration,
+                                [](const AtResponse& response) -> bool {
+                                   return response.holds<CGREG>();
+                                });
+            if (!response || response->isParseError()) {
+                status = FAILURE(RadioError::INTERNAL_ERR);
+                goto failed;
+            } else if (const CGREG* cgreg = response->get_if<CGREG>()) {
+                std::lock_guard<std::mutex> lock(mMtx);
+                mCgreg = *cgreg;
+            }
+
+            response =
+                mAtConversation(requestPipe, atCmds::getEpsRegistration,
+                                [](const AtResponse& response) -> bool {
+                                   return response.holds<CEREG>();
+                                });
+            if (!response || response->isParseError()) {
+                status = FAILURE(RadioError::INTERNAL_ERR);
+                goto failed;
+            } else if (const CEREG* cereg = response->get_if<CEREG>()) {
+                std::lock_guard<std::mutex> lock(mMtx);
+                mCereg = *cereg;
+            }
+        }
+
         {
             std::lock_guard<std::mutex> lock(mMtx);
-            regStateResult.regState = mCreg.state;
-            areaCode = mCreg.areaCode;
-            cellId = mCreg.cellId;
+            if (isRegistered(mCereg.state)) {
+                regStateResult.regState = mCereg.state;
+                areaCode = mCereg.areaCode;
+                cellId = mCereg.cellId;
+            } else {
+                regStateResult.regState = mCgreg.state;
+                areaCode = mCgreg.areaCode;
+                cellId = mCgreg.cellId;
+            }
         }
 
         std::tie(status, regStateResult.cellIdentity) =
@@ -1441,6 +1484,7 @@ void RadioNetwork::handleUnsolicited(const AtResponse::CFUN& cfun) {
         changed = mCreg.state != network::RegState::NOT_REG_MT_NOT_SEARCHING_OP;
         mCreg.state = network::RegState::NOT_REG_MT_NOT_SEARCHING_OP;
         mCgreg.state = network::RegState::NOT_REG_MT_NOT_SEARCHING_OP;
+        mCereg.state = network::RegState::NOT_REG_MT_NOT_SEARCHING_OP;
     } else {
         changed = false;
     }
@@ -1467,8 +1511,29 @@ void RadioNetwork::handleUnsolicited(const AtResponse::CREG& creg) {
 }
 
 void RadioNetwork::handleUnsolicited(const AtResponse::CGREG& cgreg) {
-    std::lock_guard<std::mutex> lock(mMtx);
-    mCgreg = cgreg;
+    bool changed;
+    {
+        std::lock_guard<std::mutex> lock(mMtx);
+        changed = mCgreg.state != cgreg.state;
+        mCgreg = cgreg;
+    }
+
+    if (changed && mRadioNetworkIndication) {
+        mRadioNetworkIndication->networkStateChanged(RadioIndicationType::UNSOLICITED);
+    }
+}
+
+void RadioNetwork::handleUnsolicited(const AtResponse::CEREG& cereg) {
+    bool changed;
+    {
+        std::lock_guard<std::mutex> lock(mMtx);
+        changed = mCereg.state != cereg.state;
+        mCereg = cereg;
+    }
+
+    if (changed && mRadioNetworkIndication) {
+        mRadioNetworkIndication->networkStateChanged(RadioIndicationType::UNSOLICITED);
+    }
 }
 
 void RadioNetwork::handleUnsolicited(const AtResponse::CSQ& csq) {
