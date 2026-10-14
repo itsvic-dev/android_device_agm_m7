@@ -17,10 +17,13 @@
 #define FAILURE_DEBUG_PREFIX "AtResponse"
 
 #include <algorithm>
+#include <atomic>
 #include <charconv>
 #include <numeric>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <vector>
 
 #include "atCmds.h"
 #include "AtResponse.h"
@@ -86,6 +89,14 @@ std::string_view ltrim(std::string_view s) {
         } else {
             break;
         }
+    }
+    return s;
+}
+
+std::string_view trim(std::string_view s) {
+    s = ltrim(s);
+    while (!s.empty() && s.back() <= 0x20) {
+        s.remove_suffix(1);
     }
     return s;
 }
@@ -216,6 +227,12 @@ AtResponse::ParseResult AtResponse::parse(const std::string_view str) {
     };
 #undef CMD
 
+    // The modem echoes commands until ATE0.
+    if (str.starts_with("AT"sv)) {
+        const size_t end = str.find(kCR);
+        return { (end == str.npos) ? 0 : int(end + 1), nullptr };
+    }
+
     static constexpr std::string_view kRING = "RING\r"sv;
     if (str.starts_with(kRING)) {
         return { int(kRING.size()), AtResponse::make(RING()) };
@@ -241,6 +258,20 @@ AtResponse::ParseResult AtResponse::parse(const std::string_view str) {
         } else {
             return { consumed, nullptr };
         }
+    }
+
+    // MediaTek: +ICCID: replaces +CICCID, and pads odd-length ICCIDs with an F.
+    static constexpr std::string_view kICCID = "+ICCID:"sv;
+    if (str.starts_with(kICCID)) {
+        const size_t pos = str.find(krOKr);
+        if (pos == str.npos) {
+            return { 0, nullptr };
+        }
+        std::string iccid = toString(trim(str.substr(kICCID.size(), pos - kICCID.size())));
+        while (!iccid.empty() && (iccid.back() == 'f' || iccid.back() == 'F')) {
+            iccid.pop_back();
+        }
+        return { int(pos + krOKr.size()), make(std::move(iccid)) };
     }
 
     switch (str.front()) {
@@ -273,7 +304,7 @@ AtResponse::ParseResult AtResponse::parse(const std::string_view str) {
 
     const size_t pos = str.find(krOKr);
     if (pos != str.npos) {
-        std::string value(str.begin(), str.begin() + pos);
+        std::string value = toString(trim(str.substr(0, pos)));
         return { int(pos + krOKr.size()), make(std::move(value)) };
     }
 
@@ -383,23 +414,53 @@ AtResponsePtr AtResponse::CPINR::parse(const std::string_view str) {
 }
 
 #undef FAILURE_DEBUG_PREFIX
+namespace {
+// Splits a, "b,c", d into a, "b,c" and d; quotes stay so callers see quoted fields.
+std::vector<std::string_view> splitFields(const std::string_view str) {
+    std::vector<std::string_view> fields;
+    size_t start = 0;
+    bool quoted = false;
+    for (size_t i = 0; i <= str.size(); ++i) {
+        if (i == str.size() || (str[i] == ',' && !quoted)) {
+            std::string_view f = str.substr(start, i - start);
+            while (!f.empty() && f.front() == ' ') f.remove_prefix(1);
+            while (!f.empty() && f.back() == ' ') f.remove_suffix(1);
+            fields.push_back(f);
+            start = i + 1;
+        } else if (str[i] == '"') {
+            quoted = !quoted;
+        }
+    }
+    return fields;
+}
+
+std::string_view unquote(std::string_view f) {
+    if (f.size() >= 2 && f.front() == '"' && f.back() == '"') {
+        f = f.substr(1, f.size() - 2);
+    }
+    return f;
+}
+
+bool toInt(const std::string_view f, int* value, const int base = 10) {
+    const std::string_view u = unquote(f);
+    return !u.empty() &&
+           std::from_chars(u.data(), u.data() + u.size(), *value, base).ec == std::errc();
+}
+}  // namespace
+
 #define FAILURE_DEBUG_PREFIX "CRSM"
 AtResponsePtr AtResponse::CRSM::parse(const std::string_view str) {
     CRSM crsm;
 
-    Parser parser(str);
-    if (parser(&crsm.sw1).skip(',')(&crsm.sw2).hasMore()) {
-        if (parser.skip(',').matchSoFar()) {
-            crsm.response = toString(parser.remaining());
-        } else {
-            return FAILURE_V(makeParseErrorFor<CRSM>(),
-                             "Can't parse: '%*.*s'",
-                             int(str.size()), int(str.size()), str.data());
-        }
-    } else if (!parser.fullMatch()) {
+    // MediaTek: sw1, sw2, "response"
+    const std::vector<std::string_view> f = splitFields(str);
+    if (f.size() < 2 || f.size() > 3 || !toInt(f[0], &crsm.sw1) || !toInt(f[1], &crsm.sw2)) {
         return FAILURE_V(makeParseErrorFor<CRSM>(),
                          "Can't parse: '%*.*s'",
                          int(str.size()), int(str.size()), str.data());
+    }
+    if (f.size() == 3) {
+        crsm.response = toString(unquote(f[2]));
     }
 
     return make(std::move(crsm));
@@ -407,14 +468,53 @@ AtResponsePtr AtResponse::CRSM::parse(const std::string_view str) {
 
 #undef FAILURE_DEBUG_PREFIX
 #define FAILURE_DEBUG_PREFIX "CFUN"
+namespace {
+std::atomic<int> gLastRegisteredAct{-1};
+}  // namespace
+
+int lastRegisteredAccessTechnology() {
+    return gLastRegisteredAct.load();
+}
+
+namespace {
+// +CREG/+CGREG/+CEREG, unsolicited (stat,"lac","ci",act,...) or answer (n,stat,"lac","ci",act,...).
+// MediaTek modems add a routing area, a cause type and a reject cause at the end.
+template <class REG> bool parseReg(const std::string_view str, REG* reg) {
+    const std::vector<std::string_view> f = splitFields(str);
+    size_t stat = 0;
+    if (f.size() >= 2 && !f[1].starts_with('"')) {
+        stat = 1;  // n,stat,...
+    }
+
+    int state;
+    if (!toInt(f[stat], &state)) {
+        return false;
+    }
+    reg->state = static_cast<network::RegState>(state);
+
+    if (f.size() > stat + 2 && f[stat + 1].starts_with('"')) {
+        toInt(f[stat + 1], &reg->areaCode, 16);
+        toInt(f[stat + 2], &reg->cellId, 16);
+        if (f.size() > stat + 3) {
+            toInt(f[stat + 3], &reg->networkType);
+            if ((state == 1 || state == 5) && reg->networkType >= 0) {
+                gLastRegisteredAct.store(reg->networkType);
+            }
+        }
+    }
+    return true;
+}
+}  // namespace
+
 AtResponsePtr AtResponse::CFUN::parse(const std::string_view str) {
     using modem::RadioState;
 
     int state;
     Parser parser(str);
     if (parser(&state).fullMatch()) {
+        // 4 is flight mode on MediaTek modems; only 1 means the radio is on.
         CFUN cfun = {
-            .state = state ? RadioState::ON : RadioState::OFF,
+            .state = (state == 1) ? RadioState::ON : RadioState::OFF,
         };
         return make(std::move(cfun));
     } else {
@@ -428,50 +528,8 @@ AtResponsePtr AtResponse::CFUN::parse(const std::string_view str) {
 #define FAILURE_DEBUG_PREFIX "CREG"
 AtResponsePtr AtResponse::CREG::parse(const std::string_view str) {
     CREG creg;
-    Parser parser(str);
-    std::string_view areaCodeHex;
-    std::string_view cellIdHex;
-    int unsolMode;
-    int state;
-
-    switch (std::count(str.begin(), str.end(), ',')) {
-    case 0:  // state
-        if (parser(&state).fullMatch()) {
-            creg.state = static_cast<network::RegState>(state);
-            return make(std::move(creg));
-        }
-        break;
-
-    case 1:  // unsolMode,state
-        if (parser(&unsolMode).skip(',')(&state).fullMatch()) {
-            creg.state = static_cast<network::RegState>(state);
-            return make(std::move(creg));
-        }
-        break;
-
-    case 3:  // state,areaCode,cellId,networkType
-        if (parser(&state).skip(',').skip('"')(&areaCodeHex, '"')
-                  .skip(',').skip('"')(&cellIdHex, '"').skip(',')
-                  (&creg.networkType).fullMatch()) {
-            std::from_chars(areaCodeHex.begin(), areaCodeHex.end(), creg.areaCode, 16);
-            std::from_chars(cellIdHex.begin(), cellIdHex.end(), creg.cellId, 16);
-            creg.state = static_cast<network::RegState>(state);
-            return make(std::move(creg));
-        }
-        break;
-
-    case 4:  // unsolMode,state,areaCode,cellId,networkType
-        if (parser(&unsolMode).skip(',')
-                  (&state).skip(',')
-                  .skip('"')(&areaCodeHex, '"').skip(',')
-                  .skip('"')(&cellIdHex, '"').skip(',')
-                  (&creg.networkType).fullMatch()) {
-            std::from_chars(areaCodeHex.begin(), areaCodeHex.end(), creg.areaCode, 16);
-            std::from_chars(cellIdHex.begin(), cellIdHex.end(), creg.cellId, 16);
-            creg.state = static_cast<network::RegState>(state);
-            return make(std::move(creg));
-        }
-        break;
+    if (parseReg(str, &creg)) {
+        return make(std::move(creg));
     }
 
     return FAILURE_V(makeParseErrorFor<CREG>(),
@@ -483,50 +541,8 @@ AtResponsePtr AtResponse::CREG::parse(const std::string_view str) {
 #define FAILURE_DEBUG_PREFIX "CGREG"
 AtResponsePtr AtResponse::CGREG::parse(const std::string_view str) {
     CGREG cgreg;
-    Parser parser(str);
-    std::string_view areaCodeHex;
-    std::string_view cellIdHex;
-    int unsolMode;
-    int state;
-
-    switch (std::count(str.begin(), str.end(), ',')) {
-    case 0:  // state
-        if (parser(&state).fullMatch()) {
-            cgreg.state = static_cast<network::RegState>(state);
-            return make(std::move(cgreg));
-        }
-        break;
-
-    case 1:  // unsolMode,state
-        if (parser(&unsolMode).skip(',')(&state).fullMatch()) {
-            cgreg.state = static_cast<network::RegState>(state);
-            return make(std::move(cgreg));
-        }
-        break;
-
-    case 3:  // state,areaCode,cellId,networkType
-        if (parser(&state).skip(',').skip('"')(&areaCodeHex, '"')
-                  .skip(',').skip('"')(&cellIdHex, '"').skip(',')
-                  (&cgreg.networkType).fullMatch()) {
-            std::from_chars(areaCodeHex.begin(), areaCodeHex.end(), cgreg.areaCode, 16);
-            std::from_chars(cellIdHex.begin(), cellIdHex.end(), cgreg.cellId, 16);
-            cgreg.state = static_cast<network::RegState>(state);
-            return make(std::move(cgreg));
-        }
-        break;
-
-    case 4:  // unsolMode,state,areaCode,cellId,networkType
-        if (parser(&unsolMode).skip(',')
-                  (&state).skip(',')
-                  .skip('"')(&areaCodeHex, '"').skip(',')
-                  .skip('"')(&cellIdHex, '"').skip(',')
-                  (&cgreg.networkType).fullMatch()) {
-            std::from_chars(areaCodeHex.begin(), areaCodeHex.end(), cgreg.areaCode, 16);
-            std::from_chars(cellIdHex.begin(), cellIdHex.end(), cgreg.cellId, 16);
-            cgreg.state = static_cast<network::RegState>(state);
-            return make(std::move(cgreg));
-        }
-        break;
+    if (parseReg(str, &cgreg)) {
+        return make(std::move(cgreg));
     }
 
     return FAILURE_V(makeParseErrorFor<CGREG>(),
@@ -538,50 +554,8 @@ AtResponsePtr AtResponse::CGREG::parse(const std::string_view str) {
 #define FAILURE_DEBUG_PREFIX "CEREG"
 AtResponsePtr AtResponse::CEREG::parse(const std::string_view str) {
     CEREG cereg;
-    Parser parser(str);
-    std::string_view areaCodeHex;
-    std::string_view cellIdHex;
-    int unsolMode;
-    int state;
-
-    switch (std::count(str.begin(), str.end(), ',')) {
-    case 0:  // state
-        if (parser(&state).fullMatch()) {
-            cereg.state = static_cast<network::RegState>(state);
-            return make(std::move(cereg));
-        }
-        break;
-
-    case 1:  // unsolMode,state
-        if (parser(&unsolMode).skip(',')(&state).fullMatch()) {
-            cereg.state = static_cast<network::RegState>(state);
-            return make(std::move(cereg));
-        }
-        break;
-
-    case 3:  // state,areaCode,cellId,networkType
-        if (parser(&state).skip(',').skip('"')(&areaCodeHex, '"')
-                  .skip(',').skip('"')(&cellIdHex, '"').skip(',')
-                  (&cereg.networkType).fullMatch()) {
-            std::from_chars(areaCodeHex.begin(), areaCodeHex.end(), cereg.areaCode, 16);
-            std::from_chars(cellIdHex.begin(), cellIdHex.end(), cereg.cellId, 16);
-            cereg.state = static_cast<network::RegState>(state);
-            return make(std::move(cereg));
-        }
-        break;
-
-    case 4:  // unsolMode,state,areaCode,cellId,networkType
-        if (parser(&unsolMode).skip(',')
-                  (&state).skip(',')
-                  .skip('"')(&areaCodeHex, '"').skip(',')
-                  .skip('"')(&cellIdHex, '"').skip(',')
-                  (&cereg.networkType).fullMatch()) {
-            std::from_chars(areaCodeHex.begin(), areaCodeHex.end(), cereg.areaCode, 16);
-            std::from_chars(cellIdHex.begin(), cellIdHex.end(), cereg.cellId, 16);
-            cereg.state = static_cast<network::RegState>(state);
-            return make(std::move(cereg));
-        }
-        break;
+    if (parseReg(str, &cereg)) {
+        return make(std::move(cereg));
     }
 
     return FAILURE_V(makeParseErrorFor<CEREG>(),
@@ -689,32 +663,50 @@ AtResponsePtr AtResponse::COPS::parse(const std::string_view str) {
 
         return make(std::move(cops));
     } else {
-        std::string str;
-        int networkSelectionMode, n;
-
-        if (!parser(&networkSelectionMode).skip(',')(&n).skip(',')(&str, kCR).matchSoFar()) {
-            goto err;
-        }
-
-        if ((n == 2) && parser.fullMatch()) {
-            cops.networkSelectionMode = static_cast<COPS::NetworkSelectionMode>(networkSelectionMode);
-            cops.numeric = std::move(str);
-            return make(std::move(cops));
-        } else if (n != 0) {
-            goto err;
-        } else if ((str == "0") && parser.fullMatch()) {
-            cops.networkSelectionMode = static_cast<COPS::NetworkSelectionMode>(networkSelectionMode);
-            return make(std::move(cops));
-        }
-
+        // One +COPS: line per AT+COPS? in the request: mode[,format,"oper"[,act]].
         COPS::OperatorInfo operatorInfo;
         operatorInfo.state = COPS::OperatorInfo::State::CURRENT;
-        operatorInfo.longName = std::move(str);
+        int lines = 0;
+        int lastFormat = -1;
+        bool registered = false;
 
-        if (!parser.skip("+COPS:").skip(' ').skip("0,1,")(&operatorInfo.shortName, kCR)
-                   .skip("+COPS:").skip(' ').skip("0,2,")(&operatorInfo.numeric, kCR)
-                   .fullMatch()) {
+        for (std::string_view rest = str; !rest.empty();) {
+            const size_t eol = rest.find(kCR);
+            std::string_view line = rest.substr(0, eol);
+            rest = (eol == rest.npos) ? std::string_view() : rest.substr(eol + 1);
+            if (!line.starts_with("+COPS:")) {
+                continue;
+            }
+            line.remove_prefix(6);
+
+            const std::vector<std::string_view> f = splitFields(line);
+            int mode;
+            if (!toInt(f[0], &mode)) {
+                goto err;
+            }
+            cops.networkSelectionMode = static_cast<COPS::NetworkSelectionMode>(mode);
+            ++lines;
+
+            int format;
+            if (f.size() >= 3 && toInt(f[1], &format)) {
+                const std::string name(unquote(f[2]));
+                lastFormat = format;
+                registered = true;
+                switch (format) {
+                case 0: operatorInfo.longName = name; break;
+                case 1: operatorInfo.shortName = name; break;
+                case 2: operatorInfo.numeric = name; break;
+                }
+            }
+        }
+
+        if (lines == 0) {
             goto err;
+        } else if (!registered) {
+            return make(std::move(cops));
+        } else if (lines == 1 && lastFormat == 2) {
+            cops.numeric = operatorInfo.numeric;
+            return make(std::move(cops));
         }
 
         cops.operators.push_back(std::move(operatorInfo));

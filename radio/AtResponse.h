@@ -45,6 +45,9 @@ namespace implementation {
 struct AtResponse;
 using AtResponsePtr = std::shared_ptr<const AtResponse>;
 
+// 27.007 <AcT> of the last registered +CREG/+CGREG/+CEREG, or -1.
+int lastRegisteredAccessTechnology();
+
 struct AtResponse {
     using ParseResult = std::pair<int, AtResponsePtr>;
 

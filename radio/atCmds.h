@@ -67,9 +67,9 @@ static constexpr std::string_view getSimCardStatus =
 static constexpr std::string_view reportStkServiceRunning =
     "AT+CUSATD?"sv;
 
-static constexpr std::string_view getICCID = "AT+CICCID"sv;
+static constexpr std::string_view getICCID = "AT+ICCID?"sv;
 
-static constexpr std::string_view getIMEI = "AT+CGSN=2"sv;
+static constexpr std::string_view getIMEI = "AT+CGSN"sv;
 
 static constexpr std::string_view getIMSI = "AT+CIMI"sv;
 
