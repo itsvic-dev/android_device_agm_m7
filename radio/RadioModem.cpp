@@ -340,8 +340,9 @@ bool RadioModem::setRadioPowerImpl(const AtChannel::RequestPipe requestPipe,
         }
     }
 
+    // MediaTek: +CFUN=0 also turns the SIM off; flight mode (4) keeps it on.
     AtResponsePtr response =
-        mAtConversation(requestPipe, std::format("AT+CFUN={0:d}", powerOn ? 1 : 0),
+        mAtConversation(requestPipe, std::format("AT+CFUN={0:d}", powerOn ? 1 : 4),
                         [](const AtResponse& response) -> bool {
                             return response.holds<AtResponse::OK>();
                         });
