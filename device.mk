@@ -85,6 +85,11 @@ PRODUCT_VENDOR_PROPERTIES += \
     apexd.config.dm_create.timeout=10000 \
     ro.sf.lcd_density=120
 
+# Recovery layout for 240x320: 24 px menu rows, small indent, battery beside the logo
+PRODUCT_VENDOR_PROPERTIES += \
+    ro.recovery.ui.compact=true \
+    ro.recovery.ui.menu_padding=4
+
 # For the PowerVR driver; Mesa reads PVR_I_WANT_A_BROKEN_VULKAN_DRIVER from the property
 PRODUCT_VENDOR_PROPERTIES += \
     ro.hardware.vulkan=powervr_mesa \
