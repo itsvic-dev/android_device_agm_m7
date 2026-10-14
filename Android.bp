@@ -5,3 +5,11 @@
 
 soong_namespace {
 }
+
+// The Wi-Fi driver loads its NVRAM from /vendor/firmware; the file is on the stock nvdata partition
+install_symlink {
+    name: "mt6739-wlan-nvram.bin",
+    installed_location: "firmware/mt6739-wlan-nvram.bin",
+    symlink_target: "/mnt/vendor/nvdata/APCFG/APRDEB/WIFI",
+    soc_specific: true,
+}

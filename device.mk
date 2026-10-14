@@ -80,6 +80,9 @@ PRODUCT_VENDOR_PROPERTIES += \
     apexd.config.dm_create.timeout=10000 \
     ro.sf.lcd_density=120
 
+PRODUCT_PACKAGES += \
+    mt6739-wlan-nvram.bin
+
 # Recovery
 PRODUCT_BUILD_RECOVERY_IMAGE := true
 
