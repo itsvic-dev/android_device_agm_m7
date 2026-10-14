@@ -1,0 +1,11 @@
+# The HAL needs the modem AT port, which appears when the modem has started.
+on property:vendor.modem.ready=1
+    setprop vendor.qemu.vport.modem /dev/wwan0at0
+    start vendor.radio-agm
+
+service vendor.radio-agm /vendor/bin/hw/android.hardware.radio-service.agm
+    class hal
+    user radio
+    group radio inet misc log readproc wakelock
+    capabilities BLOCK_SUSPEND NET_ADMIN NET_RAW
+    disabled

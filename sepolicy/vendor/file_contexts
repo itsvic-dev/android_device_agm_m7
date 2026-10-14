@@ -15,3 +15,4 @@
 /data/vendor/ccci-fs(/.*)?                              u:object_r:vendor_ccci_fs_data_file:s0
 /vendor/bin/ccci-fsd                                    u:object_r:ccci_fsd_exec:s0
 /vendor/bin/ccci-fs-seed                                u:object_r:ccci_fsd_exec:s0
+/vendor/bin/hw/android\.hardware\.radio-service\.agm  u:object_r:hal_radio_default_exec:s0

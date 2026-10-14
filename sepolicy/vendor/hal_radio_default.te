@@ -1,0 +1,5 @@
+# AIDL radio HAL on the modem AT port; it configures wwan0 itself
+allow hal_radio_default radio_device:chr_file rw_file_perms;
+allow hal_radio_default self:udp_socket { create_socket_perms getattr };
+allowxperm hal_radio_default self:udp_socket ioctl { SIOCGIFINDEX SIOCGIFFLAGS SIOCSIFFLAGS SIOCSIFADDR SIOCSIFNETMASK SIOCSIFMTU };
+get_prop(hal_radio_default, vendor_default_prop)
