@@ -14,6 +14,8 @@ on init
 
 on fs
     mkdir /mnt/vendor/nvdata 0770 system system
+    mkdir /mnt/vendor/protect_f 0770 system system
+    mkdir /mnt/vendor/protect_s 0770 system system
     mount_all --early
 
 # GPU: the DDK 1.9 firmware is in /vendor/firmware/powervr
@@ -44,4 +46,24 @@ service vendor.logcat_metadata /system/bin/logcat -b all -v threadtime -f /metad
     user root
     group log
     seclabel u:r:logpersist:s0
+    disabled
+
+# The default 3.3 MiB reserve lets a full page cache starve atomic allocations in the USB gadget
+on boot
+    write /proc/sys/vm/min_free_kbytes 16384
+
+# Modem: NVRAM file service on a copy of the stock NVRAM, then the modem start
+on post-fs-data
+    mkdir /data/vendor/ccci-fs 0700 radio radio
+    # radio reads the stock radio:radio files, system the root:system ones
+    exec - radio radio system -- /vendor/bin/ccci-fs-seed
+    start vendor.ccci-fsd
+
+on property:init.svc.vendor.ccci-fsd=running
+    write /sys/bus/platform/drivers/mt6739-ccci/10014000.modem/state 1
+
+service vendor.ccci-fsd /vendor/bin/ccci-fsd /dev/ccci_fs /data/vendor/ccci-fs
+    class main
+    user radio
+    group radio system
     disabled

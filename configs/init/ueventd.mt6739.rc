@@ -7,3 +7,9 @@ firmware_directories /vendor/firmware
 
 # Backlight
 /sys/class/backlight/*  brightness  0664  system  system
+
+# Modem NVRAM file service
+/dev/ccci_fs  0660  radio  radio
+
+# Modem AT port, for the RIL
+/dev/wwan0at0  0660  radio  radio

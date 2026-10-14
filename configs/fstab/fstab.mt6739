@@ -17,7 +17,9 @@ odm         /odm         erofs  ro  wait,logical,first_stage_mount
 
 # Stock NVRAM (eMMC, read-only), for the Wi-Fi calibration and MAC
 # TODO: confirm the MSDC0 sysfs name (soc/11230000.mmc)
-/dev/block/platform/soc/11230000.mmc/by-name/nvdata  /mnt/vendor/nvdata  ext4  ro,noload,nosuid,nodev,noatime  wait,nofail
+/dev/block/platform/soc/11230000.mmc/by-name/nvdata  /mnt/vendor/nvdata  ext4  ro,noload,nosuid,nodev,noatime,context=u:object_r:vendor_nvdata_file:s0  wait,nofail
+/dev/block/platform/soc/11230000.mmc/by-name/protect1  /mnt/vendor/protect_f  ext4  ro,noload,nosuid,nodev,noatime,context=u:object_r:vendor_nvdata_file:s0  wait,nofail
+/dev/block/platform/soc/11230000.mmc/by-name/protect2  /mnt/vendor/protect_s  ext4  ro,noload,nosuid,nodev,noatime,context=u:object_r:vendor_nvdata_file:s0  wait,nofail
 
 # The MediaTek bootloader message partition, as in the stock fstab
 /dev/block/platform/soc/11230000.mmc/by-name/para  /misc  emmc  defaults  defaults

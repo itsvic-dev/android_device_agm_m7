@@ -1,0 +1,15 @@
+// Modem NVRAM file service; src/main.rs is a copy of tools/ccci-fsd in nixos-agm-m7.
+rust_binary {
+    name: "ccci-fsd",
+    crate_name: "ccci_fsd",
+    srcs: ["src/main.rs"],
+    edition: "2024",
+    rustlibs: ["liblibc"],
+    vendor: true,
+}
+
+sh_binary {
+    name: "ccci-fs-seed",
+    src: "ccci-fs-seed.sh",
+    vendor: true,
+}

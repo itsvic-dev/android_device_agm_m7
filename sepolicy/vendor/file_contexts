@@ -5,4 +5,13 @@
 
 # eMMC (read-only for Android)
 /dev/block/platform/soc/11230000\.mmc/by-name/nvdata    u:object_r:vendor_nvdata_block_device:s0
-/mnt/vendor/nvdata(/.*)?                                u:object_r:vendor_nvdata_file:s0
+/dev/block/platform/soc/11230000\.mmc/by-name/protect[12]  u:object_r:vendor_nvdata_block_device:s0
+/mnt/vendor/nvdata/.*                                   u:object_r:vendor_nvdata_file:s0
+/mnt/vendor/protect_[fs]/.*                             u:object_r:vendor_nvdata_file:s0
+
+# Modem
+/dev/ccci_fs                                            u:object_r:ccci_device:s0
+/dev/wwan0at0                                           u:object_r:radio_device:s0
+/data/vendor/ccci-fs(/.*)?                              u:object_r:vendor_ccci_fs_data_file:s0
+/vendor/bin/ccci-fsd                                    u:object_r:ccci_fsd_exec:s0
+/vendor/bin/ccci-fs-seed                                u:object_r:ccci_fsd_exec:s0

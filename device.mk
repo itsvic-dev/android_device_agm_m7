@@ -85,6 +85,11 @@ PRODUCT_VENDOR_PROPERTIES += \
     apexd.config.dm_create.timeout=10000 \
     ro.sf.lcd_density=120
 
+# Modem NVRAM file service (ccci-fsd) and its seed script
+PRODUCT_PACKAGES += \
+    ccci-fs-seed \
+    ccci-fsd
+
 # Recovery layout for 240x320: 24 px menu rows, small indent, battery beside the logo
 PRODUCT_VENDOR_PROPERTIES += \
     ro.recovery.ui.compact=true \

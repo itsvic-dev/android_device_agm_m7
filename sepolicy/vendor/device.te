@@ -1,1 +1,2 @@
 type vendor_nvdata_block_device, dev_type;
+type ccci_device, dev_type;

@@ -1,1 +1,3 @@
 type vendor_nvdata_file, file_type;
+type proc_min_free_kbytes, fs_type, proc_type;
+type vendor_ccci_fs_data_file, file_type, data_file_type;
