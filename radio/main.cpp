@@ -134,7 +134,8 @@ int mainImpl(impl::AtChannel::HostChannelFactory hostChannelFactory) {
             const AtResponsePtr response =
                 conversation(pipe, cmd,
                              [](const AtResponse& response) -> bool {
-                                 return response.holds<OK>();
+                                 return response.holds<OK>() || response.isERROR() ||
+                                        response.holds<AtResponse::CmeError>();
                              });
 
             if (!response) {

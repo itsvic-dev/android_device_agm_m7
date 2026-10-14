@@ -16,11 +16,15 @@
 
 #define FAILURE_DEBUG_PREFIX "AtChannel"
 
+#include <algorithm>
+#include <atomic>
 #include <cstring>
+#include <string>
 #include <unistd.h>
 
 #include "AtChannel.h"
 #include "debug.h"
+#include "ratUtils.h"
 
 namespace aidl {
 namespace android {
@@ -85,11 +89,17 @@ void AtChannel::addResponseSink(ResponseSink responseSink) {
     mResponseSinks.push_back(std::move(responseSink));
 }
 
+namespace {
+// A request that the modem rejected fails, but the channel still works.
+std::atomic<bool> gRequestRejected{false};
+}  // namespace
+
 void AtChannel::requestLoop() {
     while (true) {
         const Requester requester = getRequester();
         if (requester) {
-            if (!requester(getHostChannelPipe())) {
+            gRequestRejected = false;
+            if (!requester(getHostChannelPipe()) && !gRequestRejected) {
                 resetHostChannel();
             }
         } else {
@@ -168,13 +178,21 @@ AtChannel::RequestPipe AtChannel::getHostChannelPipe() {
     return RequestPipe(hostChannelFd);
 }
 
+namespace {
+// The MediaTek modem ends lines with CR LF, the parser expects CR only.
+int dropLineFeeds(char* const buf, const int len) {
+    return std::remove(buf, buf + len, '\n') - buf;
+}
+}  // namespace
+
 bool AtChannel::receiveResponses(const int hostChannelFd,
                                  std::vector<char>* unconsumed) {
     const size_t unconsumedSize = unconsumed->size();
     if (unconsumedSize == 0) {
         char buf[128];
-        const int len = ::read(hostChannelFd, buf, sizeof(buf));
+        int len = ::read(hostChannelFd, buf, sizeof(buf));
         if (len > 0) {
+            len = dropLineFeeds(buf, len);
             return receiveResponsesImpl(buf, buf + len, unconsumed);
         } else if (len < 0) {
             const int err = errno;
@@ -188,9 +206,10 @@ bool AtChannel::receiveResponses(const int hostChannelFd,
     } else {
         const size_t newSize = std::max(unconsumedSize + 1024, unconsumed->capacity());
         unconsumed->resize(newSize);
-        const int len = ::read(hostChannelFd, &(*unconsumed)[unconsumedSize],
-                               newSize - unconsumedSize);
+        int len = ::read(hostChannelFd, &(*unconsumed)[unconsumedSize],
+                         newSize - unconsumedSize);
         if (len > 0) {
+            len = dropLineFeeds(&(*unconsumed)[unconsumedSize], len);
             unconsumed->resize(unconsumedSize + len);
             char* begin = unconsumed->data();
             char* end = begin + unconsumedSize + len;
@@ -245,11 +264,44 @@ const char* AtChannel::receiveOneResponse(const char* const begin, const char* c
     return (consumed >= 0) ? (begin + consumed) : nullptr;
 }
 
+namespace {
+// AT+CTEC is a command of the emulator modem. The MediaTek modem reports its
+// technology in the <AcT> of +CREG/+CGREG/+CEREG, and +ERAT=6,4 already allows
+// GSM, WCDMA and LTE, so the HAL answers +CTEC itself.
+AtResponsePtr emulateCtec(const std::string_view request) {
+    using ratUtils::ModemTechnology;
+    AtResponse::CTEC ctec;
+
+    if (request == "AT+CTEC=?") {
+        for (const ModemTechnology t : { ModemTechnology::GSM, ModemTechnology::WCDMA,
+                                         ModemTechnology::LTE }) {
+            ctec.values.push_back(std::to_string(static_cast<int>(t)));
+        }
+    } else if (request == "AT+CTEC?") {
+        ModemTechnology t;
+        switch (lastRegisteredAccessTechnology()) {
+        case 2: case 4: case 5: case 6: t = ModemTechnology::WCDMA; break;
+        case 7: t = ModemTechnology::LTE; break;
+        default: t = ModemTechnology::GSM; break;
+        }
+        ctec.values.push_back(std::to_string(1 << static_cast<int>(t)));
+    } else {
+        ctec.values.push_back("DONE");
+    }
+
+    return AtResponse::make(std::move(ctec));
+}
+}  // namespace
+
 AtResponsePtr AtChannel::Conversation::operator()(
         const RequestPipe requestPipe,
         const std::string_view request,
         const AtChannel::Conversation::FilterFunc& filter,
         const AtChannel::Conversation::Duration timeout) {
+    if (request.starts_with("AT+CTEC")) {
+        return emulateCtec(request);
+    }
+
     std::future<AtResponsePtr> futureResponse;
 
     {
@@ -287,13 +339,35 @@ AtResponsePtr AtChannel::Conversation::operator()(
 
 bool AtChannel::Conversation::send(const AtResponsePtr& response) {
     std::lock_guard<std::mutex> lock(mMtx);
-    if (mFilter && (*mFilter)(*response)) {
-        mFilter = nullptr;
-        mSink.set_value(response);
-        return true;
+    if (!mFilter) {
+        return false;
+    }
+
+    AtResponsePtr delivered;
+    if ((*mFilter)(*response)) {
+        delivered = response;
+    } else if (response->isERROR() || response->holds<AtResponse::CmeError>()) {
+        // MediaTek answers unsupported commands with a plain ERROR. Fail the request now
+        // instead of after a timeout, as a CME error if the request accepts one.
+        AtResponsePtr cmeError = response;
+        if (response->isERROR()) {
+            cmeError = AtResponse::make(AtResponse::CmeError{
+                    .error = RadioError::REQUEST_NOT_SUPPORTED,
+            });
+        }
+        if ((*mFilter)(*cmeError)) {
+            delivered = std::move(cmeError);
+        } else {
+            RLOGW("%s: the modem rejected the request", __func__);
+            gRequestRejected = true;
+        }
     } else {
         return false;
     }
+
+    mFilter = nullptr;
+    mSink.set_value(std::move(delivered));
+    return true;
 }
 
 }  // namespace implementation
