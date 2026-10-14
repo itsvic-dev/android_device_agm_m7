@@ -123,3 +123,6 @@ BOARD_VENDOR_SEPOLICY_DIRS += $(DEVICE_PATH)/sepolicy/vendor
 
 # Verified boot (LK is unlocked and does not check AVB)
 BOARD_AVB_ENABLE := false
+
+# Wi-Fi: the goldfish vendor HAL uses plain nl80211, like on Cuttlefish
+BOARD_WLAN_DEVICE := emulator

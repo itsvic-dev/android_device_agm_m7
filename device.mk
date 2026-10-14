@@ -106,10 +106,11 @@ $(call inherit-product, $(SRC_TARGET_DIR)/product/emulated_storage.mk)
 # Soong namespaces
 PRODUCT_SOONG_NAMESPACES += \
     $(DEVICE_PATH) \
+    device/generic/goldfish \
     kernel/mainline/configs
 
 # Wi-Fi
-# TODO: Wi-Fi HAL choice and the mt6739-wlan module load order (see DESIGN.md)
+# TODO: the mt6739-wlan module load order (see DESIGN.md)
 PRODUCT_PACKAGES += \
     android.hardware.wifi-service
 
