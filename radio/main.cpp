@@ -105,12 +105,9 @@ int mainImpl(impl::AtChannel::HostChannelFactory hostChannelFactory) {
         static const std::string_view initCmds[] = {
             "ATE0Q0V1"sv,
             "AT+CMEE=1"sv,
-            // MediaTek: the SIM is off until +EFUN=0; the PDN commands need +EIFCONFIG and +EDALLOW
+            // MediaTek: the SIM is off until +EFUN=0
             "AT+EBOOT=0"sv,
             "AT+EFUN=0"sv,
-            "AT+EIFCONFIG=3"sv,
-            "AT+EIAREG=1"sv,
-            "AT+EDALLOW=1"sv,
             "AT+CREG=2"sv,
             "AT+CGREG=2"sv,
             "AT+CEREG=2"sv,

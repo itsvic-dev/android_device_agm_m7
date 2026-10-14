@@ -350,6 +350,25 @@ bool RadioModem::setRadioPowerImpl(const AtChannel::RequestPipe requestPipe,
         return FAILURE(false);
     }
 
+    // MediaTek: the PDN commands need these, and the modem accepts them only with the
+    // radio on. ModemManager sends them right after +CFUN=1 too; sent later, when the
+    // modem is already on GSM, +EDALLOW=1 can block the AT channel.
+    if (powerOn) {
+        using namespace std::literals;
+        for (const std::string_view cmd : {"AT+EIFCONFIG=3"sv, "AT+EIAREG=1"sv,
+                                           "AT+EDALLOW=1"sv}) {
+            response = mAtConversation(requestPipe, cmd,
+                                       [](const AtResponse& response) -> bool {
+                                           return response.holds<AtResponse::OK>() ||
+                                                  response.isERROR() ||
+                                                  response.holds<AtResponse::CmeError>();
+                                       });
+            if (!response) {
+                return FAILURE(false);
+            }
+        }
+    }
+
     // to broadcast CFUN from the listening thread
     response =
         mAtConversation(requestPipe, atCmds::getModemPowerState,
