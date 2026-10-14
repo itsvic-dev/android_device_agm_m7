@@ -77,11 +77,12 @@ CellIdentityCdma makeCellIdentityCdma(OperatorInfo operatorInfo) {
 }
 
 std::string getMcc(const OperatorInfo& operatorInfo) {
-    return operatorInfo.operatorNumeric.substr(0, 3);
+    return operatorInfo.operatorNumeric.substr(0, 3);  // empty when not registered
 }
 
 std::string getMnc(const OperatorInfo& operatorInfo) {
-    return operatorInfo.operatorNumeric.substr(3);
+    const std::string& numeric = operatorInfo.operatorNumeric;
+    return (numeric.size() > 3) ? numeric.substr(3) : std::string();
 }
 
 CellIdentityGsm makeCellIdentityGsm(OperatorInfo operatorInfo,
@@ -249,9 +250,10 @@ CellIdentityResult getCellIdentityImpl(const int areaCode, const int cellId, std
     } else if (const COPS* cops = response->get_if<COPS>()) {
         if ((cops->operators.size() == 1) && (cops->operators[0].isCurrent())) {
             operatorInfo = toOperatorInfo(cops->operators[0]);
-        } else {
+        } else if (!cops->operators.empty()) {
             response->unexpected(FAILURE_DEBUG_PREFIX, __func__);
         }
+        // No operator: not registered yet, the cell has no PLMN.
     } else if (const CmeError* cmeError = response->get_if<CmeError>()) {
         const RadioError status =
             (cmeError->error == RadioError::OPERATION_NOT_ALLOWED) ?
@@ -710,9 +712,10 @@ ScopedAStatus RadioNetwork::getOperator(const int32_t serial) {
                 longName = current.longName;
                 shortName = current.shortName;
                 numeric = current.numeric;
-            } else {
+            } else if (!cops->operators.empty()) {
                 response->unexpected(FAILURE_DEBUG_PREFIX, kFunc);
             }
+            // No operator: not registered yet, the names stay empty.
         } else if (const CmeError* cmeError = response->get_if<CmeError>()) {
             status = (cmeError->error == RadioError::OPERATION_NOT_ALLOWED) ?
                     RadioError::RADIO_NOT_AVAILABLE : cmeError->error;
