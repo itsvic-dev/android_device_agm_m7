@@ -35,6 +35,9 @@ TARGET_SCREEN_HEIGHT := 320
 # Dalvik heap
 $(call inherit-product, frameworks/native/build/phone-xhdpi-1024-dalvik-heap.mk)
 
+# Dexpreopt: apps without a profile get full AOT code, the CPU is the bottleneck
+PRODUCT_DEX_PREOPT_DEFAULT_COMPILER_FILTER := speed
+
 # Dynamic partitions
 PRODUCT_USE_DYNAMIC_PARTITIONS := true
 PRODUCT_BUILD_SUPER_PARTITION := true
