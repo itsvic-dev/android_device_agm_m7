@@ -16,7 +16,10 @@
 
 #define FAILURE_DEBUG_PREFIX "RadioData"
 
+#include <chrono>
+#include <cstdlib>
 #include <format>
+#include <thread>
 #include <string_view>
 
 #include <android-base/properties.h>
@@ -47,7 +50,7 @@ const std::string kInterfaceNameTemplate = "buried_eth0";
 #else
 const std::string kInterfaceNameTemplate =
         ::android::base::GetProperty("ro.boot.qemu.radio.data_interface_name",
-                                     "eth0");
+                                     "wwan0");
 #endif
 
 bool isSharedInterface() {
@@ -296,6 +299,24 @@ ScopedAStatus RadioData::releasePduSessionId(const int32_t serial,
     return ScopedAStatus::ok();
 }
 
+namespace {
+// Splits "a, "b,c", d" into a, b,c and d.
+std::vector<std::string> splitFields(const std::string_view payload) {
+    std::vector<std::string> fields(1);
+    bool quoted = false;
+    for (const char c : payload) {
+        if (c == '"') {
+            quoted = !quoted;
+        } else if (c == ',' && !quoted) {
+            fields.emplace_back();
+        } else if (c != ' ' || quoted) {
+            fields.back().push_back(c);
+        }
+    }
+    return fields;
+}
+}  // namespace
+
 ScopedAStatus RadioData::setupDataCall(const int32_t serial,
                                        const AccessNetwork /*accessNetwork*/,
                                        const DataProfileInfo& dataProfileInfo,
@@ -307,25 +328,27 @@ ScopedAStatus RadioData::setupDataCall(const int32_t serial,
                                        const std::optional<data::SliceInfo>& /*sliceInfo*/,
                                        const bool /*matchAllRuleAllowed*/) {
     const int32_t cid = allocateId(mCallIdAllocator);
-    if (!setInterfaceState(cid, true)) {
-        releaseId(mCallIdAllocator, cid);
-        NOT_NULL(mRadioDataResponse)->setupDataCallResponse(
-                makeRadioResponseInfo(serial, FAILURE(RadioError::GENERIC_FAILURE)), {});
-        return ScopedAStatus::ok();
-    }
 
-    static const char* const kFunc = __func__;
     mAtChannel->queueRequester([this, serial, cid, dataProfileInfo, pduSessionId]
                                (const AtChannel::RequestPipe requestPipe) -> bool {
+        using namespace std::chrono_literals;
         using CmeError = AtResponse::CmeError;
-        using CGCONTRDP = AtResponse::CGCONTRDP;
-        RadioError status;
 
-        SetupDataCallResult setupDataCallResult = {
+        const auto run = [this, requestPipe](const std::string& request,
+                                             const AtChannel::Conversation::Duration timeout) {
+            return mAtConversation(requestPipe, request,
+                                   [](const AtResponse& response) -> bool {
+                                       return response.holds<AtResponse::OK>() ||
+                                              response.isERROR() ||
+                                              response.holds<CmeError>();
+                                   }, timeout);
+        };
+
+        SetupDataCallResult result = {
             .suggestedRetryTime = -1,
             .cid = cid,
             .active = SetupDataCallResult::DATA_CONNECTION_STATUS_ACTIVE,
-            .type = dataProfileInfo.protocol,
+            .type = PdpProtocolType::IP,
             .ifname = getInterfaceName(cid),
             .mtuV4 = 1500,
             .mtuV6 = 1500,
@@ -333,90 +356,104 @@ ScopedAStatus RadioData::setupDataCall(const int32_t serial,
             .pduSessionId = pduSessionId,
         };
 
-        std::string request;
-        std::tie(setupDataCallResult.cause, request) =
-                formatCGDCONT(cid, dataProfileInfo.protocol, dataProfileInfo.apn);
-        if (setupDataCallResult.cause != DataCallFailCause::NONE) {
-            status = RadioError::INVALID_ARGUMENTS;
-
-failed:     releaseId(mCallIdAllocator, cid);
-            if (setupDataCallResult.cause == DataCallFailCause::NONE) {
-                setupDataCallResult.cause = toDataCallFailCause(status);
-            }
-
-            setupDataCallResult.cid = -1;
-            setupDataCallResult.active = SetupDataCallResult::DATA_CONNECTION_STATUS_INACTIVE;
-            setupDataCallResult.suggestedRetryTime = 10000;
-
+        const auto fail = [&](const RadioError status, const DataCallFailCause cause) -> bool {
+            releaseId(mCallIdAllocator, cid);
+            result.cause = (cause == DataCallFailCause::NONE) ? toDataCallFailCause(status)
+                                                               : cause;
+            result.cid = -1;
+            result.active = SetupDataCallResult::DATA_CONNECTION_STATUS_INACTIVE;
+            result.suggestedRetryTime = 10000;
             NOT_NULL(mRadioDataResponse)->setupDataCallResponse(
-                    makeRadioResponseInfo(serial, status), setupDataCallResult);
+                    makeRadioResponseInfo(serial, status), result);
             return status != RadioError::INTERNAL_ERR;
+        };
+
+        const std::string& apn = dataProfileInfo.apn;
+        if (apn.empty()) {
+            return fail(FAILURE(RadioError::INVALID_ARGUMENTS),
+                        DataCallFailCause::MISSING_UNKNOWN_APN);
+        }
+
+        // MediaTek PDN setup, as the stock RIL does it. The APN table steps fail with
+        // CME ERROR 5841 when the APN is already there, which is fine.
+        run("AT+EAPNSET", 5s);
+        run(std::format("AT+EAPNSET=\"{0:s}\",1,\"{1:s}\",\"{2:s}\"",
+                        apn, dataProfileInfo.user, dataProfileInfo.password), 5s);
+        run(std::format("AT+EAPNSET=\"{0:s}\",2,\"type=default,supl,hipri;protocol=IP;"
+                        "roaming_protocol=IP;authtype={1:d};carrier_enabled=1;max_conns=0;"
+                        "max_conns_time=0;wait_time=0;bearer_bitmask=2147352575;"
+                        "inactive_timer=0\"",
+                        apn, static_cast<int>(dataProfileInfo.authType)), 5s);
+        run(std::format("AT+EIAAPN=\"{0:s}\",0", apn), 10s);
+
+        {
+            std::lock_guard<std::mutex> lock(mMtx);
+            mPdn = {};
         }
 
         AtResponsePtr response =
-            mAtConversation(requestPipe, request,
-                            [](const AtResponse& response) -> bool {
-                               return response.holds<AtResponse::OK>() ||
-                                      response.holds<CmeError>();
-                            });
+            run(std::format("AT+EAPNACT=1,\"{0:s}\",\"default\",0", apn), 60s);
         if (!response) {
-            status = FAILURE(RadioError::INTERNAL_ERR);
-            goto failed;
+            return fail(FAILURE(RadioError::INTERNAL_ERR), DataCallFailCause::NONE);
         } else if (const CmeError* err = response->get_if<CmeError>()) {
-            status = FAILURE_V(err->error, "%s",  toString(err->error).c_str());
-            goto failed;
+            return fail(FAILURE_V(err->error, "%s", toString(err->error).c_str()),
+                        DataCallFailCause::NONE);
         } else if (!response->holds<AtResponse::OK>()) {
-            response->unexpected(FAILURE_DEBUG_PREFIX, kFunc);
+            return fail(FAILURE(RadioError::GENERIC_FAILURE), DataCallFailCause::NONE);
         }
 
-        request = std::format("AT+CGCONTRDP={0:d}", cid);
-        response =
-            mAtConversation(requestPipe, request,
-                            [](const AtResponse& response) -> bool {
-                               return response.holds<CGCONTRDP>() ||
-                                      response.holds<CmeError>();
-                            });
-        if (!response || response->isParseError()) {
-            status = FAILURE(RadioError::INTERNAL_ERR);
-            goto failed;
-        } else if (const CGCONTRDP* cgcontrdp = response->get_if<CGCONTRDP>()) {
-            if (!setIpAddr(cgcontrdp->localAddr.c_str(),
-                           cgcontrdp->localAddrSize,
-                           setupDataCallResult.ifname.c_str())) {
-                status = FAILURE(RadioError::GENERIC_FAILURE);
-                goto failed;
+        // +EIF and +CGEV usually come before the OK, but may follow it.
+        MtkPdn pdn;
+        for (int i = 0; i < 100; ++i) {
+            {
+                std::lock_guard<std::mutex> lock(mMtx);
+                pdn = mPdn;
             }
-
-            const auto makeLinkAddress = [](const std::string_view address,
-                                            const size_t addrSize) -> data::LinkAddress {
-                return {
-                    .address = std::format("{0:s}/{1:d}", address, addrSize),
-                    .addressProperties = 0,
-                    .deprecationTime = -1,
-                    .expirationTime = -1,
-                };
-            };
-
-            setupDataCallResult.addresses.push_back(
-                makeLinkAddress(cgcontrdp->localAddr, cgcontrdp->localAddrSize));
-            setupDataCallResult.gateways.push_back(cgcontrdp->gwAddr);
-            setupDataCallResult.dnses.push_back(cgcontrdp->dns1);
-            if (!cgcontrdp->dns2.empty()) {
-                setupDataCallResult.dnses.push_back(cgcontrdp->dns2);
+            if (pdn.ifid >= 0 && pdn.aid >= 0 && !pdn.ipv4.empty()) {
+                break;
             }
+            std::this_thread::sleep_for(100ms);
+        }
+        if (pdn.ifid < 0 || pdn.ipv4.empty()) {
+            if (pdn.aid >= 0) {
+                run(std::format("AT+EAPNACT=0,{0:d}", pdn.aid), 30s);
+            }
+            return fail(FAILURE(RadioError::GENERIC_FAILURE), DataCallFailCause::NONE);
+        }
+        if (pdn.aid < 0) {
+            pdn.aid = 0;
+        }
 
+        // The modem sends downlink only after the AP confirms the interface.
+        run(std::format("AT+EIF={0:d},\"ifst\",\"up\",1", pdn.ifid), 5s);
+        run(std::format("AT+EPDN={0:d},\"ifst\",20", pdn.aid), 5s);
+        run("AT+CGCONTRDP", 5s);
+
+        if (!setIpAddr(pdn.ipv4.c_str(), 32, result.ifname.c_str()) ||
+                !setInterfaceState(cid, true)) {
+            run(std::format("AT+EAPNACT=0,{0:d}", pdn.aid), 30s);
+            return fail(FAILURE(RadioError::GENERIC_FAILURE), DataCallFailCause::NONE);
+        }
+
+        result.addresses.push_back({
+            .address = std::format("{0:s}/32", pdn.ipv4),
+            .addressProperties = 0,
+            .deprecationTime = -1,
+            .expirationTime = -1,
+        });
+        result.gateways.push_back("0.0.0.0");
+        result.mtuV4 = pdn.mtu;
+        {
             std::lock_guard<std::mutex> lock(mMtx);
-            mDataCalls.insert({ cid, setupDataCallResult });
-            status = RadioError::NONE;
-        } else if (const CmeError* err = response->get_if<CmeError>()) {
-            status = FAILURE_V(err->error, "%s",  toString(err->error).c_str());
-            goto failed;
-        } else {
-            response->unexpected(FAILURE_DEBUG_PREFIX, kFunc);
+            if (const auto i = mDnsByAid.find(pdn.aid); i != mDnsByAid.end()) {
+                result.dnses = i->second;
+            }
+            mCidToAid[cid] = pdn.aid;
+            mDataCalls.insert({ cid, result });
         }
 
         NOT_NULL(mRadioDataResponse)->setupDataCallResponse(
-            makeRadioResponseInfo(serial), std::move(setupDataCallResult));
+            makeRadioResponseInfo(serial), std::move(result));
 
         NOT_NULL(mRadioDataIndication)->dataCallListChanged(
             RadioIndicationType::UNSOLICITED, getDataCalls());
@@ -431,17 +468,35 @@ ScopedAStatus RadioData::deactivateDataCall(
         const data::DataRequestReason /*reason*/) {
     bool removed;
     bool empty;
+    int32_t aid = -1;
     {
         std::lock_guard<std::mutex> lock(mMtx);
         const auto i = mDataCalls.find(cid);
         if (i != mDataCalls.end()) {
             mDataCalls.erase(i);
             mCallIdAllocator.put(cid);
+            if (const auto j = mCidToAid.find(cid); j != mCidToAid.end()) {
+                aid = j->second;
+                mCidToAid.erase(j);
+            }
             removed = true;
         } else {
             removed = false;
         }
         empty = mDataCalls.empty();
+    }
+
+    if (aid >= 0) {
+        mAtChannel->queueRequester([this, aid](const AtChannel::RequestPipe requestPipe) -> bool {
+            using namespace std::chrono_literals;
+            mAtConversation(requestPipe, std::format("AT+EAPNACT=0,{0:d}", aid),
+                            [](const AtResponse& response) -> bool {
+                                return response.holds<AtResponse::OK>() ||
+                                       response.isERROR() ||
+                                       response.holds<AtResponse::CmeError>();
+                            }, 30s);
+            return true;
+        });
     }
 
     if (!isSharedInterface() || empty) {
@@ -553,6 +608,55 @@ ScopedAStatus RadioData::notifyImsDataNetwork(int32_t serial,
 
 ScopedAStatus RadioData::responseAcknowledgement() {
     return ScopedAStatus::ok();
+}
+
+void RadioData::handleUnsolicited(const AtResponse::Unsolicited& unsolicited) {
+    const std::vector<std::string> f = splitFields(unsolicited.payload);
+    const std::string_view payload = unsolicited.payload;
+    int32_t droppedCid = -1;
+
+    {
+        std::lock_guard<std::mutex> lock(mMtx);
+        if (unsolicited.cmd == "EIF" && f.size() >= 4 && f[1] == "ifup") {
+            mPdn.ifid = std::atoi(f[0].c_str());
+            mPdn.ipv4 = f[3];
+        } else if (unsolicited.cmd == "EIF" && f.size() >= 3 && f[1] == "mtu") {
+            mPdn.mtu = std::atoi(f[2].c_str());
+        } else if (unsolicited.cmd == "EPDN" && f.size() >= 7 && f[1] == "new") {
+            mPdn.aid = std::atoi(f[0].c_str());
+            mPdn.ifid = std::atoi(f[3].c_str());
+            mPdn.mtu = std::atoi(f[4].c_str());
+            mPdn.ipv4 = f[6];
+        } else if (unsolicited.cmd == "CGEV" && payload.starts_with("ME PDN ACT ")) {
+            mPdn.aid = std::atoi(payload.substr(11).data());
+        } else if (unsolicited.cmd == "CGEV" && payload.starts_with("NW PDN DEACT ")) {
+            const int32_t aid = std::atoi(payload.substr(13).data());
+            for (const auto& [cid, a] : mCidToAid) {
+                if (a == aid) {
+                    droppedCid = cid;
+                    break;
+                }
+            }
+            if (droppedCid >= 0) {
+                mCidToAid.erase(droppedCid);
+                mDataCalls.erase(droppedCid);
+                mCallIdAllocator.put(droppedCid);
+            }
+        } else if (unsolicited.cmd == "CGCONTRDP" && f.size() >= 7) {
+            std::vector<std::string> dnses;
+            for (const std::string& dns : { f[5], f[6] }) {
+                if (!dns.empty()) {
+                    dnses.push_back(dns);
+                }
+            }
+            mDnsByAid[std::atoi(f[0].c_str())] = std::move(dnses);
+        }
+    }
+
+    if (droppedCid >= 0 && mRadioDataIndication) {
+        mRadioDataIndication->dataCallListChanged(RadioIndicationType::UNSOLICITED,
+                                                  getDataCalls());
+    }
 }
 
 void RadioData::atResponseSink(const AtResponsePtr& response) {

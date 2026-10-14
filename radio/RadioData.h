@@ -82,6 +82,7 @@ struct RadioData : public data::BnRadioData {
 
     void atResponseSink(const AtResponsePtr& response);
     template <class IGNORE> void handleUnsolicited(const IGNORE&) {}
+    void handleUnsolicited(const AtResponse::Unsolicited&);
 
     ScopedAStatus responseAcknowledgement() override;
     ScopedAStatus setResponseFunctions(
@@ -102,6 +103,17 @@ private:
     std::unordered_map<int32_t, data::SetupDataCallResult> mDataCalls;
     std::unordered_set<int32_t> mKeepAliveSessions;
     IdAllocator mCallIdAllocator;
+
+    // The PDN that +EAPNACT activates, from +EIF, +CGEV and +EPDN
+    struct MtkPdn {
+        int ifid = -1;
+        int aid = -1;
+        int mtu = 1500;
+        std::string ipv4;
+    };
+    MtkPdn mPdn;
+    std::unordered_map<int32_t, int32_t> mCidToAid;
+    std::unordered_map<int32_t, std::vector<std::string>> mDnsByAid;
     IdAllocator mSessionIdAllocator;
     mutable std::mutex mMtx;
 };
