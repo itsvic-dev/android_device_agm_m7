@@ -5,7 +5,9 @@
 
 DEVICE_PATH := device/agm/m7
 
-# Must be set before mainline/common, its prebuilt_kernel/board.mk reads it
+# Must be set before mainline/common, its prebuilt_kernel/board.mk reads them.
+# Image.gz with mt6739-agm-m7.dtb appended, plus *.ko next to it (see DESIGN.md)
+TARGET_PREBUILT_KERNEL := device/agm/m7-kernel/Image.gz-dtb
 TARGET_KERNEL_MIXED_MODE := false
 
 include device/mainline/common/BoardConfigMainlineCommon.mk
@@ -49,8 +51,6 @@ TARGET_USERIMAGES_USE_F2FS := true
 BOARD_USERDATAIMAGE_FILE_SYSTEM_TYPE := f2fs
 
 # Kernel
-# Image.gz with mt6739-agm-m7.dtb appended, plus *.ko next to it (see DESIGN.md)
-TARGET_PREBUILT_KERNEL := device/agm/m7-kernel/Image.gz-dtb
 TARGET_KERNEL_ARCH := arm64
 
 # The header cmdline field is 512 bytes; LK ignores extra_cmdline (TODO: verify)
