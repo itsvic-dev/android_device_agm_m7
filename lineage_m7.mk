@@ -5,12 +5,12 @@
 
 $(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit_only.mk)
 $(call inherit-product, $(SRC_TARGET_DIR)/product/generic_no_telephony.mk)
+$(call inherit-product, $(SRC_TARGET_DIR)/product/telephony.mk)
 $(call inherit-product, $(SRC_TARGET_DIR)/product/languages_full.mk)
 
-# Same as common_mini_go_phone.mk, without telephony.mk
+# Same as common_mini_go_phone.mk, with AOSP telephony for mobile data only (no SMS or calls yet)
 PRODUCT_TYPE := go
 $(call inherit-product, vendor/lineage/config/common_mobile_mini.mk)
-$(call inherit-product, vendor/lineage/config/wifionly.mk)
 
 PRODUCT_IS_GO := true
 $(call inherit-product, device/agm/m7/device.mk)

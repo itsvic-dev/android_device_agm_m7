@@ -85,6 +85,14 @@ PRODUCT_VENDOR_PROPERTIES += \
     apexd.config.dm_create.timeout=10000 \
     ro.sf.lcd_density=120
 
+# Mobile data: AIDL radio HAL on the modem AT port, and the APN database
+PRODUCT_PACKAGES += \
+    android.hardware.radio-service.agm \
+    apns-conf.xml
+
+PRODUCT_COPY_FILES += \
+    frameworks/native/data/etc/android.hardware.telephony.data.xml:$(TARGET_COPY_OUT_VENDOR)/etc/permissions/android.hardware.telephony.data.xml
+
 # Modem NVRAM file service (ccci-fsd) and its seed script
 PRODUCT_PACKAGES += \
     ccci-fs-seed \
