@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    SPDX-FileCopyrightText: The LineageOS Project
+    SPDX-License-Identifier: Apache-2.0
+-->
+<resources>
+    <!-- TODO: hardware key bit mask once the keypad mapping is final (HOME 1, BACK 2, MENU 4) -->
+    <integer name="config_deviceHardwareKeys">7</integer>
+
+    <bool name="config_supportAutoRotation">false</bool>
+</resources>

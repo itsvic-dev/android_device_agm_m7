@@ -1,0 +1,15 @@
+# Display
+ro.surface_flinger.max_frame_buffer_acquired_buffers=2
+debug.sf.vsync_reactor_ignore_present_fences=true
+
+# Graphics (Composer)
+ro.vendor.hwc.drm.present_fence_not_reliable=true
+
+# Graphics (Allocator)
+vendor.minigbm.generic_backend=dumb_generic
+
+# Input
+qemu.hw.mainkeys=0
+
+# USB
+ro.vendor.usb.vid=18d1

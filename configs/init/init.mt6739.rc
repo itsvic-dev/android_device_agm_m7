@@ -1,0 +1,42 @@
+#
+# SPDX-FileCopyrightText: The LineageOS Project
+# SPDX-License-Identifier: Apache-2.0
+#
+
+import /vendor/etc/init/hw/init.mainline.rc
+
+on early-init
+    write /sys/block/mmcblk1/queue/read_ahead_kb 512
+
+on init
+    setprop sys.usb.controller musb-hdrc.1.auto
+    write /sys/block/zram0/comp_algorithm zstd
+
+on fs
+    mkdir /mnt/vendor/nvdata 0770 system system
+    mount_all --early
+
+on late-fs
+    mount_all --late
+
+on boot
+    swapon_all
+
+# Wi-Fi: the module needs the CONSYS firmware from /vendor and the NVRAM from /mnt/vendor/nvdata
+# TODO: decide between modules.load (dlkm_loader_mainline) and this explicit load
+on post-fs-data
+    mkdir /data/vendor/wifi 0770 wifi wifi
+    exec u:r:vendor_modprobe:s0 -- /vendor/bin/modprobe -d /vendor/lib/modules mt6739-wlan
+
+# Debug: logcat on /metadata, which NixOS can read after a reset
+on post-fs
+    mkdir /metadata/logcat 0770 root log
+
+on post-fs-data
+    start vendor.logcat_metadata
+
+service vendor.logcat_metadata /system/bin/logcat -b all -v threadtime -f /metadata/logcat/logcat -r 1024 -n 4
+    user root
+    group log
+    seclabel u:r:logpersist:s0
+    disabled

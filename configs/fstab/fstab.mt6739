@@ -1,0 +1,23 @@
+# /dev/block/by-name/* exists only for the boot device (the microSD card, androidboot.boot_devices).
+# eMMC partitions belong to NixOS and the stock firmware: never "formattable", never "check".
+
+# Super (microSD)
+system      /system      erofs  ro  wait,logical,first_stage_mount
+system_ext  /system_ext  erofs  ro  wait,logical,first_stage_mount
+product     /product     erofs  ro  wait,logical,first_stage_mount
+vendor      /vendor      erofs  ro  wait,logical,first_stage_mount
+odm         /odm         erofs  ro  wait,logical,first_stage_mount
+
+# Metadata (microSD)
+/dev/block/by-name/sd_metadata  /metadata  ext4  noatime,nosuid,nodev,discard  wait,check,formattable,first_stage_mount
+
+# Userdata (microSD)
+# TODO: confirm AES CE on this A53 (aes in /proc/cpuinfo), else fileencryption=adiantum
+/dev/block/by-name/userdata  /data  f2fs  noatime,nosuid,nodev,discard,reserve_root=32768,resgid=1065  wait,check,formattable,latemount,quota,fileencryption=aes-256-xts:aes-256-cts:v2,checkpoint=fs
+
+# Stock NVRAM (eMMC, read-only), for the Wi-Fi calibration and MAC
+# TODO: confirm the MSDC0 sysfs name (soc/11230000.mmc)
+/dev/block/platform/soc/11230000.mmc/by-name/nvdata  /mnt/vendor/nvdata  ext4  ro,noload,nosuid,nodev,noatime  wait,nofail
+
+# ZRAM
+/dev/block/zram0  none  swap  defaults  zramsize=50%,max_comp_streams=4

@@ -1,0 +1,9 @@
+#
+# SPDX-FileCopyrightText: The LineageOS Project
+# SPDX-License-Identifier: Apache-2.0
+#
+
+on init
+    # TODO: same UDC name as init.mt6739.rc
+    setprop sys.usb.controller musb-hdrc.1.auto
+    setprop sys.usb.configfs 1

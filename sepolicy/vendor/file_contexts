@@ -1,0 +1,8 @@
+# microSD (boot device)
+/dev/block/platform/soc/11240000\.mmc/by-name/super     u:object_r:super_block_device:s0
+/dev/block/platform/soc/11240000\.mmc/by-name/sd_metadata  u:object_r:metadata_block_device:s0
+/dev/block/platform/soc/11240000\.mmc/by-name/userdata  u:object_r:userdata_block_device:s0
+
+# eMMC (read-only for Android)
+/dev/block/platform/soc/11230000\.mmc/by-name/nvdata    u:object_r:vendor_nvdata_block_device:s0
+/mnt/vendor/nvdata(/.*)?                                u:object_r:vendor_nvdata_file:s0

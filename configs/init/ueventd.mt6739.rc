@@ -1,0 +1,9 @@
+#
+# SPDX-FileCopyrightText: The LineageOS Project
+# SPDX-License-Identifier: Apache-2.0
+#
+
+firmware_directories /vendor/firmware
+
+# Backlight
+/sys/class/backlight/*  brightness  0664  system  system
