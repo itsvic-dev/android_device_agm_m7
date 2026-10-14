@@ -19,6 +19,7 @@
 
 #include <cutils/properties.h>
 #include <fcntl.h>
+#include <unistd.h>
 #include <linux/vm_sockets.h>
 
 #include <android-base/properties.h>
@@ -243,12 +244,15 @@ unique_fd openHostChannel(const int vsockPort) {
 }
 #else
 unique_fd openHostChannel(const char* channelName) {
-    const int fd = ::open(channelName, O_RDWR);
-    if (fd >= 0) {
-        return unique_fd(fd);
-    } else {
-        return FAILURE_V(unique_fd(), "Could not open '%s'", channelName);
+    // The modem AT port appears only after the modem has booted.
+    for (int i = 0; i < 60; ++i) {
+        const int fd = ::open(channelName, O_RDWR);
+        if (fd >= 0) {
+            return unique_fd(fd);
+        }
+        ::sleep(1);
     }
+    return FAILURE_V(unique_fd(), "Could not open '%s': %s", channelName, strerror(errno));
 }
 #endif
 
