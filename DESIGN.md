@@ -189,32 +189,29 @@ GRUB, A/B and `vendor_boot`, which this phone cannot use.
 
 ### 2.2 Kernel
 
-- Prebuilt: `TARGET_PREBUILT_KERNEL := device/agm/m7-kernel/Image.gz-dtb`.
-  `Image.gz-dtb` is `cat Image.gz mt6739-agm-m7.dtb`, the same layout that
-  `scripts/mkboot.py` builds. Put the `*.ko` files (at least
-  `mt6739-wlan.ko`, `cfg80211.ko`, `powervr.ko`) in the same directory.
-  `TARGET_KERNEL_MIXED_MODE := false`, so no `system_dlkm.modules.load` is
-  needed.
-- [inferred] Best source: a new flake output in `nixos-agm-m7`
-  (`packages.aarch64-linux.android-kernel`) built from `linux-mt6739`
-  `linux-7.2` with `agm-m7.config` + `android.config`. Then copy the output to
-  `device/agm/m7-kernel/` on pl-waw01. Keep `device/agm/m7-kernel/` out of git
-  or in its own repo.
+- Inline build from `kernel/agm/m7` (`linux-mt6739`, `linux-7.2`).
+  `TARGET_KERNEL_CONFIG := agm-m7.config` is the base; the Android fragments
+  and `configs/kernel/android.config` are merged on top in one step
+  (`MERGE_ALL_KERNEL_CONFIGS_AT_ONCE`), else symbols whose dependencies come
+  from a later fragment are lost. The base gets `olddefconfig`, not
+  `allnoconfig` as on NixOS, so default-y options (CPU errata, EFI stub, ...)
+  are on.
+- `Image.gz` with `mt6739-agm-m7-android.dtb` appended
+  (`BOARD_KERNEL_APPEND_DTBS`), the same layout that `scripts/mkboot.py`
+  builds. All `*.ko` go to `/vendor/lib/modules`.
 - The DTB must still be built with `-@` and keep `lk-odm-overlay-sink`.
-- Add to the DTB (shared with NixOS, it does no harm there):
+- `mt6739-agm-m7-android.dts` adds this to the DTB:
 
   ```
   firmware {
       android {
           compatible = "android,firmware";
-          hardware = "m7";
           boot_devices = "soc/11240000.mmc";
       };
   };
   ```
 
-  DT wins over the cmdline for both values ([verified], 1.4). Then the cmdline
-  can drop them and LK cannot override them.
+  DT wins over the cmdline ([verified], 1.4), so LK cannot override it.
 - `configs/kernel/android.config` is the fragment on top of `agm-m7.config`.
   Main points:
   - Binder: C binder (`ANDROID_BINDER_IPC`, `ANDROID_BINDERFS`). Do not use

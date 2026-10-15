@@ -5,11 +5,6 @@
 
 DEVICE_PATH := device/agm/m7
 
-# Must be set before mainline/common, its prebuilt_kernel/board.mk reads them.
-# Image.gz with mt6739-agm-m7.dtb appended, plus *.ko next to it (see DESIGN.md)
-TARGET_PREBUILT_KERNEL := device/agm/m7-kernel/Image.gz-dtb
-TARGET_KERNEL_MIXED_MODE := false
-
 include device/mainline/common/BoardConfigMainlineCommon.mk
 
 BOARD_MESA3D_VULKAN_DRIVERS := imagination
@@ -55,8 +50,18 @@ TARGET_USERIMAGES_USE_EXT4 := true
 TARGET_USERIMAGES_USE_F2FS := true
 BOARD_USERDATAIMAGE_FILE_SYSTEM_TYPE := f2fs
 
-# Kernel
+# Kernel (source in kernel/agm/m7)
 TARGET_KERNEL_ARCH := arm64
+BOARD_KERNEL_IMAGE_NAME := Image.gz
+BOARD_KERNEL_APPEND_DTBS := mediatek/mt6739-agm-m7-android.dtb
+TARGET_KERNEL_CONFIG := agm-m7.config
+TARGET_KERNEL_CONFIG_EXT := \
+    kernel/configs/b/android-6.12/android-base.config \
+    $(addprefix kernel/mainline/configs/fragments/android-base-conditional/,CONFIG_ARM64-y.config CONFIG_EXT4_FS-y.config CONFIG_F2FS_FS-y.config) \
+    $(addprefix kernel/mainline/configs/fragments/android-base-pre/,common.config arm64.config) \
+    $(DEVICE_PATH)/configs/kernel/android.config
+# Fragments set symbols whose dependencies come from later fragments
+MERGE_ALL_KERNEL_CONFIGS_AT_ONCE := true
 
 # The header cmdline field is 512 bytes; LK ignores extra_cmdline (TODO: verify)
 BOARD_KERNEL_CMDLINE := \
@@ -77,8 +82,8 @@ BOARD_KERNEL_CMDLINE := \
     androidboot.init_fatal_reboot_target=bootloader \
     androidboot.verifiedbootstate=orange
 
-# "false" gives an empty modules.load; mt6739-wlan needs /mnt/vendor/nvdata, init.mt6739.rc loads it
-BOARD_VENDOR_KERNEL_MODULES_LOAD := false
+# Empty modules.load; mt6739-wlan needs /mnt/vendor/nvdata, init.mt6739.rc loads it
+BOARD_VENDOR_KERNEL_MODULES_LOAD :=
 
 # TODO: list the modules that must load in recovery (none for milestone 1)
 RECOVERY_KERNEL_MODULES :=
