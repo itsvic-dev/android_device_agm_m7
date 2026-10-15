@@ -1,0 +1,5 @@
+sh_binary {
+    name: "ccci-fs-seed",
+    src: "ccci-fs-seed.sh",
+    vendor: true,
+}
